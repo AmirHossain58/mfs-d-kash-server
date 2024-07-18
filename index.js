@@ -49,7 +49,8 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const usersCollection=client.db('mfs-d-kash').collection('users')
-    const paymentsCollection=client.db('mfs-d-kash').collection('payments')
+    const usersTransactionsCollection=client.db('mfs-d-kash').collection('users-transactions')
+    const agentsTransactionsCollection=client.db('mfs-d-kash').collection('agents-transactions')
     const cashInOrOutCollection=client.db('mfs-d-kash').collection('cash-in/out')
 
 
@@ -173,7 +174,7 @@ const verifyHost=async(req,res,next)=>{
         }
       })
       delete senderData.pin
-      await paymentsCollection.insertOne({...senderData,balance:parseInt(sender.balance)-parseInt(senderData.totalAmount)})
+      await usersTransactionsCollection.insertOne({...senderData,balance:parseInt(sender.balance)-parseInt(senderData.totalAmount)})
       
       res.status(200).send({message:'Money Send Successfully'})
     })
@@ -212,7 +213,7 @@ const verifyHost=async(req,res,next)=>{
         }
       })
       delete senderData.pin
-      await paymentsCollection.insertOne({...senderData,balance:parseInt(sender.balance)-parseInt(senderData.totalAmount)})
+      await usersTransactionsCollection.insertOne({...senderData,balance:parseInt(sender.balance)-parseInt(senderData.totalAmount)})
       
       res.status(200).send({message:'Money Send Successfully'})
     })
@@ -266,14 +267,13 @@ const verifyHost=async(req,res,next)=>{
       }
       res.send(result)
     })
-    // get all transactions-history 
+    // get all transactions-history for user
     app.get('/transactions-history/:email',async(req,res)=>{
       const {email}=req.params
       const query={email}
       const option={sort:{timeStamp:-1 }}
-      const result =await paymentsCollection.find(query,option).limit(10)
+      const result =await usersTransactionsCollection.find(query,option).limit(10)
       .toArray();
-      
       res.send(result)
     })
     // get all transactions-management 
@@ -283,6 +283,40 @@ const verifyHost=async(req,res,next)=>{
       const option={sort:{timeStamp:-1 }}
       const result =await cashInOrOutCollection.find(query,option).toArray();
       
+      res.send(result)
+    })
+    // approves transactions management
+    app.put('/transactions-management/:email',verifyToken,async(req,res)=>{
+      const email=req.params.email
+      const transactionData=req.body
+      const agent=await usersCollection.findOne({email})
+      const user=await usersCollection.findOne({email:transactionData.email})
+
+      if(transactionData.type==="cash-in"){
+        const result=await usersCollection.updateOne({email:user.email},{$set:{
+          balance:parseInt(user.balance)+parseInt(transactionData.totalAmount)
+        }})
+        res.send(result)
+      }
+      if(transactionData.type==="cash-out"){
+        const result =await usersCollection.updateOne({email:agent.email},{ $set:{
+          balance:parseInt(agent.balance)-parseInt(transactionData.totalAmount)
+        }
+        })
+        res.send(result)
+      }
+      await cashInOrOutCollection.deleteOne({_id:new ObjectId(transactionData._id)})
+      delete transactionData._id
+      await usersTransactionsCollection.insertOne(transactionData)
+      await agentsTransactionsCollection.insertOne(transactionData)
+    })
+    // get all transactions-history for agent
+    app.get('/transactions-history/:email',async(req,res)=>{
+      const {email}=req.params
+      const query={email}
+      const option={sort:{timeStamp:-1 }}
+      const result =await agentsTransactionsCollection.find(query,option).limit(20)
+      .toArray();
       res.send(result)
     })
     // grt all users
